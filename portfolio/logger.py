@@ -2,6 +2,7 @@ import csv
 import os
 import json
 import urllib.request
+import time
 from datetime import datetime
 
 LOG_FILE = "bet_log.csv"
@@ -37,9 +38,11 @@ def send_discord_alert(opp_type, match, bet, bookmaker, odds, edge, recommended_
         req = urllib.request.Request(
             webhook_url, 
             data=json.dumps(data).encode('utf-8'), 
-            headers={'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+            headers={'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0'}
         )
         urllib.request.urlopen(req)
+        # Wait 1 second to respect Discord rate limits
+        time.sleep(1)
     except Exception as e:
         print(f"Failed to send Discord alert: {e}")
 
