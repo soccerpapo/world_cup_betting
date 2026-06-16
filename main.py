@@ -20,13 +20,18 @@ def main():
     if opportunities:
         print("\nOpportunities found:")
         for opp in opportunities:
-            # Example probability and odds for demonstration
-            win_prob = 0.58 
-            odds_offered = 1.85
-            
-            bet_size = calculate_fractional_kelly(win_prob=win_prob, decimal_odds=odds_offered, fraction=0.25)
-            print(f"- {opp['match']} ({opp['bet']} on {opp['bookmaker']})")
-            print(f"  Recommended Bet Size (1/4 Kelly): {bet_size:.2%} of Bankroll")
+            if opp['type'] == '+EV':
+                win_prob = opp['win_prob']
+                odds_offered = opp['odds']
+                bet_size = calculate_fractional_kelly(win_prob=win_prob, decimal_odds=odds_offered, fraction=0.25)
+                
+                print(f"- [+EV] {opp['match']} ({opp['bet']} on {opp['bookmaker']} @ {odds_offered})")
+                print(f"  Edge: {opp['edge']:.2%} | Recommended Bet (1/4 Kelly): {bet_size:.2%} of Bankroll")
+                
+            elif opp['type'] == 'Arbitrage':
+                print(f"- [ARB] {opp['match']} ({opp['bet']})")
+                print(f"  Best Odds -> {opp['odds']}")
+                print(f"  Guaranteed Profit Margin: {opp['edge']:.2%}")
     else:
         print("No profitable opportunities found at this time.")
 
