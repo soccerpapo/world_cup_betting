@@ -1,0 +1,34 @@
+from data.fetch_odds import fetch_live_odds
+from strategy.world_cup_arb import find_arbitrage_opportunities
+from portfolio.kelly_sizing import calculate_fractional_kelly
+from features.tournament_regime import get_match_regime
+
+def main():
+    print("Starting World Cup 2026 Betting Engine...\n")
+    
+    # 1. Determine Match Regime
+    regime = get_match_regime(match_number=3) 
+    print(f"Current Match Context: {regime}")
+    
+    # 2. Fetch Odds
+    odds = fetch_live_odds(api_key="DEMO_KEY")
+    
+    # 3. Scan for +EV / Arbs
+    opportunities = find_arbitrage_opportunities(odds)
+    
+    # 4. Size Bets Conservatively
+    if opportunities:
+        print("\nOpportunities found:")
+        for opp in opportunities:
+            # Example probability and odds for demonstration
+            win_prob = 0.58 
+            odds_offered = 1.85
+            
+            bet_size = calculate_fractional_kelly(win_prob=win_prob, decimal_odds=odds_offered, fraction=0.25)
+            print(f"- {opp['match']} ({opp['bet']} on {opp['bookmaker']})")
+            print(f"  Recommended Bet Size (1/4 Kelly): {bet_size:.2%} of Bankroll")
+    else:
+        print("No profitable opportunities found at this time.")
+
+if __name__ == "__main__":
+    main()
