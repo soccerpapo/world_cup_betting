@@ -2,7 +2,7 @@ import json
 import urllib.request
 import urllib.error
 
-def fetch_live_odds(api_key, sport="soccer_fifa_world_cup", regions="us,eu,uk", markets="h2h"):
+def fetch_live_odds(api_key, sport="soccer_fifa_world_cup", regions="us,eu,uk", markets="h2h,totals"):
     """
     Fetches live odds from The-Odds-API.
     In the World Cup, latency and line-movement tracking are critical.
@@ -10,15 +10,23 @@ def fetch_live_odds(api_key, sport="soccer_fifa_world_cup", regions="us,eu,uk", 
     :param api_key: Your API key for The-Odds-API
     :param sport: The sport key (e.g., 'soccer_fifa_world_cup')
     :param regions: Bookmaker regions (us, uk, eu, au)
-    :param markets: Betting markets (h2h = Head to Head / Match Winner)
+    :param markets: Betting markets (h2h = Head to Head, totals = Over/Under)
     """
     print(f"Fetching live odds for {sport}...")
     
     if api_key == "DEMO_KEY" or not api_key:
         print("Warning: Using DEMO_KEY. Returning mock data.")
         return [
-            {"match": "USA vs FRA", "bookmaker": "Pinnacle", "odds_home": 4.50, "odds_away": 1.70, "odds_draw": 3.80},
-            {"match": "USA vs FRA", "bookmaker": "DraftKings", "odds_home": 4.00, "odds_away": 1.85, "odds_draw": 3.60}
+            {
+                "match": "USA vs FRA", "bookmaker": "Pinnacle", 
+                "odds_home": 4.50, "odds_away": 1.70, "odds_draw": 3.80,
+                "odds_over_2_5": 1.95, "odds_under_2_5": 1.90
+            },
+            {
+                "match": "USA vs FRA", "bookmaker": "DraftKings", 
+                "odds_home": 4.00, "odds_away": 1.85, "odds_draw": 3.60,
+                "odds_over_2_5": 2.05, "odds_under_2_5": 1.80
+            }
         ]
 
     url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds/?apiKey={api_key}&regions={regions}&markets={markets}"
@@ -37,12 +45,11 @@ def fetch_live_odds(api_key, sport="soccer_fifa_world_cup", regions="us,eu,uk", 
                 for bookmaker in event.get("bookmakers", []):
                     bookmaker_name = bookmaker.get("title")
                     
+                    odds_home, odds_away, odds_draw = None, None, None
+                    odds_over_2_5, odds_under_2_5 = None, None
+                    
                     for market in bookmaker.get("markets", []):
                         if market.get("key") == "h2h":
-                            odds_home = None
-                            odds_away = None
-                            odds_draw = None
-                            
                             for outcome in market.get("outcomes", []):
                                 if outcome.get("name") == home_team:
                                     odds_home = outcome.get("price")
@@ -50,14 +57,24 @@ def fetch_live_odds(api_key, sport="soccer_fifa_world_cup", regions="us,eu,uk", 
                                     odds_away = outcome.get("price")
                                 elif outcome.get("name") == "Draw":
                                     odds_draw = outcome.get("price")
+                        elif market.get("key") == "totals":
+                            for outcome in market.get("outcomes", []):
+                                # Looking for the standard 2.5 goals line
+                                if outcome.get("point") == 2.5:
+                                    if outcome.get("name") == "Over":
+                                        odds_over_2_5 = outcome.get("price")
+                                    elif outcome.get("name") == "Under":
+                                        odds_under_2_5 = outcome.get("price")
                             
-                            parsed_odds.append({
-                                "match": match_name,
-                                "bookmaker": bookmaker_name,
-                                "odds_home": odds_home,
-                                "odds_away": odds_away,
-                                "odds_draw": odds_draw
-                            })
+                    parsed_odds.append({
+                        "match": match_name,
+                        "bookmaker": bookmaker_name,
+                        "odds_home": odds_home,
+                        "odds_away": odds_away,
+                        "odds_draw": odds_draw,
+                        "odds_over_2_5": odds_over_2_5,
+                        "odds_under_2_5": odds_under_2_5
+                    })
             return parsed_odds
 
     except urllib.error.URLError as e:
