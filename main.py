@@ -9,22 +9,33 @@ from features.tournament_regime import get_match_regime
 from portfolio.logger import log_opportunity
 
 # Load environment variables from .env file
-load_dotenv()
+load_dotenv(override=True)
 
 def main():
     print("Starting World Cup 2026 Kalshi +EV Engine...\n")
     
     # 1. Credentials
-    odds_api_key = os.getenv("ODDS_API_KEY", "DEMO_KEY")
+    odds_api_key = os.getenv("ODDS_API_KEY")
     kalshi_id = os.getenv("KALSHI_API_KEY_ID")
     kalshi_key = os.getenv("KALSHI_PRIVATE_KEY")
     
+    if not odds_api_key or not kalshi_id or not kalshi_key:
+        print("Critical Error: Missing API keys in .env file.")
+        return
+
     # 2. Fetch "Truth" Odds (Sharp Bookmakers)
-    # We only care about sharp books (like Pinnacle) to define our fair probability
     sharp_odds = fetch_live_odds(api_key=odds_api_key)
+    
+    if not sharp_odds:
+        print("No live odds available (check API quota or sport status).")
+        return
     
     # 3. Fetch "Market" Prices (Kalshi)
     kalshi_prices = fetch_kalshi_prices(api_key_id=kalshi_id, private_key=kalshi_key)
+    
+    if not kalshi_prices:
+        print("No live soccer markets found on Kalshi at this time.")
+        return
     
     # 4. Scan for +EV discrepancies on Kalshi
     opportunities = find_kalshi_value(sharp_odds, kalshi_prices)
@@ -41,8 +52,7 @@ def main():
             # Dynamic Regime
             regime = get_match_regime(home_team, away_team)
             
-            # Betting math on Kalshi is different. 
-            # The 'odds' is the reciprocal of the price (e.g. $0.60 price = 1.66 decimal odds)
+            # Reciprocal of the price
             decimal_odds = 1.0 / opp['kalshi_price']
             
             # Standard risk multiplier
@@ -50,14 +60,14 @@ def main():
             if regime == "KNOCKOUT_HIGH_VARIANCE": base_fraction = 0.10
             
             bet_size = calculate_fractional_kelly(
-                win_prob=opp['true_prob'], 
+                win_prob=opp['sharp_prob'], 
                 decimal_odds=decimal_odds, 
                 fraction=base_fraction
             )
             
             print(f"- [VALUE] {opp['match']} ({opp['bet']})")
-            print(f"  Ticker: {opp['ticker']}")
-            print(f"  Kalshi Price: ${opp['kalshi_price']:.2f} | Sharp Prob: {opp['true_prob']:.1%}")
+            print(f"  Confidence: {opp['confidence']}")
+            print(f"  Kalshi Price: ${opp['kalshi_price']:.2f} | Sharp Prob: {opp['sharp_prob']:.1%} | Elo Prob: {opp['elo_prob']:.1%}")
             print(f"  Edge: {opp['edge']:.2%} | Rec. Position: {bet_size:.2%} of Bankroll")
             
             log_opportunity(
@@ -67,7 +77,7 @@ def main():
                 regime=regime
             )
     else:
-        print("No +EV opportunities found on Kalshi at this time.")
+        print("All Kalshi markets are currently efficient (No value found).")
 
 if __name__ == "__main__":
     main()

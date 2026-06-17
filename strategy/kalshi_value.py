@@ -1,3 +1,5 @@
+from features.team_strength import get_elo_probability
+
 def calculate_implied_probability(odds):
     return 1.0 / odds if odds and odds > 0 else 0.0
 
@@ -11,10 +13,10 @@ def remove_vig_3way(odds_1, odds_2, odds_3):
 
 def find_kalshi_value(sharp_odds_data, kalshi_data, sharp_book="Pinnacle"):
     """
-    Compares sharp bookmaker probabilities against Kalshi contract prices
-    to find +EV discrepancies.
+    Compares sharp bookmaker probabilities AND Elo Ratings against 
+    Kalshi contract prices to find high-confidence value.
     """
-    print("Comparing Kalshi market prices against sharp odds for value...")
+    print("Cross-checking Kalshi prices against sharp odds and Elo Ratings...")
     value_opportunities = []
     
     # 1. Extract "Truth" probabilities from sharp bookmaker
@@ -32,25 +34,42 @@ def find_kalshi_value(sharp_odds_data, kalshi_data, sharp_book="Pinnacle"):
                 "Draw": fair_draw
             }
             
-    # 2. Compare against Kalshi market prices
+    # 2. Compare against Kalshi market prices with Elo cross-check
     for k_market in kalshi_data:
         match_name = k_market["match"]
         outcome = k_market["outcome"]
-        kalshi_price = k_market["yes_price"] # e.g. 0.60
+        kalshi_price = k_market["yes_price"]
         
         if match_name in matches_truth:
-            true_prob = matches_truth[match_name].get(outcome, 0)
+            # A. Get Sharp Bookie Prob
+            sharp_prob = matches_truth[match_name].get(outcome, 0)
             
-            # If the true probability is higher than the Kalshi price, it's +EV
-            if true_prob > kalshi_price:
-                edge = true_prob - kalshi_price
+            # B. Get Elo Fundamental Prob
+            teams = match_name.split(' vs ')
+            home_team = teams[0] if len(teams) == 2 else "Unknown"
+            away_team = teams[1] if len(teams) == 2 else "Unknown"
+            elo_probs = get_elo_probability(home_team, away_team)
+            elo_prob = elo_probs.get(outcome, 0)
+            
+            # C. Determine Confidence
+            # Opportunity exists if Sharp Prob > Kalshi Price
+            if sharp_prob > kalshi_price:
+                edge = sharp_prob - kalshi_price
+                
+                # High Confidence if Elo also agrees there is value
+                confidence = "LOW"
+                if elo_prob > kalshi_price:
+                    confidence = "HIGH (Elo Confirmed)"
+                
                 value_opportunities.append({
                     "type": "Kalshi +EV",
                     "match": match_name,
                     "bet": outcome,
                     "kalshi_price": kalshi_price,
-                    "true_prob": true_prob,
+                    "sharp_prob": sharp_prob,
+                    "elo_prob": elo_prob,
                     "edge": edge,
+                    "confidence": confidence,
                     "ticker": k_market["ticker"]
                 })
                 
