@@ -29,6 +29,7 @@ def prob_to_xg(win_prob):
 def fetch_sharp_baselines(api_key):
     """
     Fetches the latest sharp odds and converts them into true probabilities to use as baselines.
+    This is called continuously to track live smart money movement.
     """
     if not api_key: return {}
     
@@ -58,19 +59,22 @@ def fetch_sharp_baselines(api_key):
                     pass
     return sharp_baselines
 
-def generate_dashboard(live_matches, sharp_baselines):
+def generate_dashboard(live_matches, live_sharp_odds):
     """
-    Creates a rich, formatted table displaying live match data and calculated probabilities.
+    Creates a rich, formatted table displaying live match data, Poisson probabilities, 
+    and live Sharp Market consensus.
     """
     table = Table(show_header=True, header_style="bold magenta", expand=True)
-    table.add_column("Minute", style="dim", width=8)
+    table.add_column("Min", style="dim", width=4)
     table.add_column("Matchup", min_width=20)
     table.add_column("Score", justify="center", style="bold white")
-    table.add_column("Base Prob Source", style="dim", justify="center")
-    table.add_column("Model Prediction (Home - Draw - Away)", justify="center", style="bold green")
+    table.add_column("Stats (Poss/Shots)", style="dim")
+    table.add_column("Poisson Math (H-D-A)", justify="center", style="bold green")
+    table.add_column("Live Sharp (H-D-A)", justify="center", style="bold cyan")
+    table.add_column("Smart Money Filter", justify="center", style="bold")
 
     if not live_matches:
-        table.add_row("N/A", "No live soccer matches currently found.", "-", "-", "-")
+        table.add_row("N/A", "No live soccer matches currently found.", "-", "-", "-", "-", "-")
         return table
 
     for match, stats in live_matches.items():
@@ -83,25 +87,24 @@ def generate_dashboard(live_matches, sharp_baselines):
         home_team = teams[0] if len(teams) == 2 else "Unknown"
         away_team = teams[1] if len(teams) == 2 else "Unknown"
 
-        # 2. Get TRUE pre-match probabilities (Prefer Sharp Market over Elo)
-        source = "Elo"
-        base_probs = get_elo_probability(home_team, away_team)
+        # 2. Get TRUE pre-match probabilities for baseline
+        base_probs = get_elo_probability(home_team, away_team) # Fallback
         
-        if match in sharp_baselines:
-            base_probs = sharp_baselines[match]
-            source = "Market"
+        sharp_live_prob = None
+        if match in live_sharp_odds:
+            base_probs = live_sharp_odds[match]
+            sharp_live_prob = live_sharp_odds[match]
         else:
-            for sharp_match, s_probs in sharp_baselines.items():
+            for sharp_match, s_probs in live_sharp_odds.items():
                 if home_team in sharp_match and away_team in sharp_match:
                     base_probs = s_probs
-                    source = "Market"
+                    sharp_live_prob = s_probs
                     break
         
-        # 3. Convert those true probabilities into Expected Goals for the Poisson model
+        # 3. Poisson Model Live Calculation
         home_xg = prob_to_xg(base_probs["Home Win"])
         away_xg = prob_to_xg(base_probs["Away Win"])
         
-        # 4. Calculate real-time probabilities using actual data AND live stats
         probs = calculate_live_probabilities(
             home_xg, away_xg, 
             current_home_score=h_score, 
@@ -110,20 +113,48 @@ def generate_dashboard(live_matches, sharp_baselines):
             home_possession=stats.get('home_possession', 50),
             away_possession=stats.get('away_possession', 50),
             home_red_cards=stats.get('home_red_cards', 0),
-            away_red_cards=stats.get('away_red_cards', 0)
+            away_red_cards=stats.get('away_red_cards', 0),
+            home_shots_on_target=stats.get('home_shots_on_target', 0),
+            away_shots_on_target=stats.get('away_shots_on_target', 0),
+            home_dangerous_attacks=stats.get('home_dangerous_attacks', 0),
+            away_dangerous_attacks=stats.get('away_dangerous_attacks', 0),
+            home_corners=stats.get('home_corners', 0),
+            away_corners=stats.get('away_corners', 0)
         )
         
-        prob_string = f"{probs['Home Win']:.1%}  -  {probs['Draw']:.1%}  -  {probs['Away Win']:.1%}"
+        prob_string = f"{probs['Home Win']:.1%} - {probs['Draw']:.1%} - {probs['Away Win']:.1%}"
+        stats_string = f"{stats.get('home_possession', 50)}%/{stats.get('away_possession', 50)}% | {stats.get('home_shots_on_target', 0)}S-{stats.get('away_shots_on_target', 0)}S"
         
-        # Color code the minute (red if past 80 mins)
+        # 4. Cross-Reference with Live Sharp Market
+        sharp_string = "N/A (Using Elo)"
+        filter_status = "[bold yellow]No Sharp Data[/bold yellow]"
+        
+        if sharp_live_prob:
+            sharp_string = f"{sharp_live_prob['Home Win']:.1%} - {sharp_live_prob['Draw']:.1%} - {sharp_live_prob['Away Win']:.1%}"
+            
+            # The Ultimate Filter: Does Math agree with Smart Money?
+            math_fav = max(probs, key=probs.get)
+            sharp_fav = max(sharp_live_prob, key=sharp_live_prob.get)
+            
+            if math_fav == sharp_fav:
+                divergence = abs(probs[math_fav] - sharp_live_prob[math_fav])
+                if divergence > 0.15: # 15% disagreement
+                    filter_status = "[bold red]DANGER (LURE)[/bold red]"
+                else:
+                    filter_status = "[bold green]SAFE TO TRADE[/bold green]"
+            else:
+                filter_status = "[bold red]DANGER (LURE)[/bold red]"
+
         min_str = f"[red]{elapsed}'[/red]" if elapsed > 80 else f"[green]{elapsed}'[/green]"
         
         table.add_row(
             min_str,
             f"[bold]{match}[/bold]",
             f"{h_score} - {a_score}",
-            source,
-            prob_string
+            stats_string,
+            prob_string,
+            sharp_string,
+            filter_status
         )
 
     return table
@@ -137,23 +168,26 @@ def run_dashboard():
         print("CRITICAL: API_FOOTBALL_KEY not found in .env file.")
         return
 
-    # Cache the sharp market probabilities at startup
-    sharp_baselines = {}
-    if odds_key:
-        print("Fetching opening market consensus from The-Odds-API (This uses 1-4 credits)...")
-        sharp_baselines = fetch_sharp_baselines(odds_key)
-
     console = Console()
     
     with Live(console=console, screen=True, refresh_per_second=1) as live:
         try:
             while True:
+                # 1. Fetch real-time data
                 live_matches = fetch_live_match_stats(api_key)
                 
-                # Show all live matches
-                display_matches = live_matches
+                # 2. Fetch LIVE Sharp Odds to catch smart money movement
+                live_sharp_odds = {}
+                if odds_key:
+                    live_sharp_odds = fetch_sharp_baselines(odds_key)
+
+                # Filter to only show games we actually care about (to save space)
+                target_teams = ["Ghana", "Panama", "France", "Iraq", "USA", "Germany", "Argentina"]
+                filtered_matches = {k: v for k, v in live_matches.items() if any(t in k for t in target_teams)}
+                display_matches = filtered_matches if filtered_matches else live_matches
                 
-                table = generate_dashboard(display_matches, sharp_baselines)
+                # 3. Generate the visual table
+                table = generate_dashboard(display_matches, live_sharp_odds)
                 
                 timestamp = datetime.now().strftime('%H:%M:%S')
                 panel = Panel(
@@ -164,6 +198,8 @@ def run_dashboard():
                 )
                 
                 live.update(panel)
+                
+                # Wait 300 seconds (5 minutes) before next API pull to conserve credits
                 time.sleep(300)
                 
         except KeyboardInterrupt:
