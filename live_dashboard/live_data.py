@@ -51,7 +51,11 @@ def fetch_live_match_stats(api_key):
                     "home_possession": 50,
                     "away_possession": 50,
                     "home_shots_on_target": 0,
-                    "away_shots_on_target": 0
+                    "away_shots_on_target": 0,
+                    "home_dangerous_attacks": 0,
+                    "away_dangerous_attacks": 0,
+                    "home_corners": 0,
+                    "away_corners": 0
                 }
                 
                 # If the API provides detailed statistics array, parse it
@@ -73,6 +77,10 @@ def fetch_live_match_stats(api_key):
                                 stats[f"{prefix}red_cards"] = int(s_val)
                             elif s_type == "Shots on Goal":
                                 stats[f"{prefix}shots_on_target"] = int(s_val)
+                            elif s_type == "Dangerous Attacks":
+                                stats[f"{prefix}dangerous_attacks"] = int(s_val)
+                            elif s_type == "Corner Kicks":
+                                stats[f"{prefix}corners"] = int(s_val)
 
                 live_matches[match_name] = stats
                 

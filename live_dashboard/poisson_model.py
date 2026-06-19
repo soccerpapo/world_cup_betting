@@ -12,10 +12,13 @@ def calculate_live_probabilities(home_expected_goals, away_expected_goals,
                                  current_home_score=0, current_away_score=0, 
                                  elapsed_minutes=0,
                                  home_possession=50, away_possession=50,
-                                 home_red_cards=0, away_red_cards=0):
+                                 home_red_cards=0, away_red_cards=0,
+                                 home_shots_on_target=0, away_shots_on_target=0,
+                                 home_dangerous_attacks=0, away_dangerous_attacks=0,
+                                 home_corners=0, away_corners=0):
     """
     Calculates the probability of Home Win, Away Win, and Draw from the current game state,
-    dynamically adjusting Expected Goals based on live match momentum.
+    dynamically adjusting Expected Goals based on deep live match momentum metrics.
     """
     
     # 1. Calculate time remaining factor
@@ -26,20 +29,35 @@ def calculate_live_probabilities(home_expected_goals, away_expected_goals,
     base_live_home_xg = home_expected_goals * time_decay
     base_live_away_xg = away_expected_goals * time_decay
     
-    # 3. Dynamic Momentum Adjustments
-    # A. Red Cards: A massive penalty to the penalized team's attack, and a boost to the opponent
-    home_red_multiplier = 1.0 - (home_red_cards * 0.4) # Lose 40% attacking power per red card
+    # 3. Dynamic Momentum Adjustments (The "Alpha" Layer)
+    
+    # A. Red Cards (Severe penalty)
+    home_red_multiplier = 1.0 - (home_red_cards * 0.4) 
     away_red_multiplier = 1.0 - (away_red_cards * 0.4)
     
-    # B. Possession: If a team is dominating the ball, they are more likely to score
-    # We normalize possession around 50%. E.g., 70% possession = 1.4 multiplier.
+    # B. Possession (Mild indicator)
     home_poss_multiplier = home_possession / 50.0 if home_possession > 0 else 1.0
     away_poss_multiplier = away_possession / 50.0 if away_possession > 0 else 1.0
 
-    # Apply adjustments. 
-    # If Home has a red card, Away gets a massive boost to their possession effectiveness.
-    live_home_xg = base_live_home_xg * home_poss_multiplier * home_red_multiplier * (1.0 + (away_red_cards * 0.5))
-    live_away_xg = base_live_away_xg * away_poss_multiplier * away_red_multiplier * (1.0 + (home_red_cards * 0.5))
+    # C. Attacking Threat (Strong indicator)
+    # We compare total attacking output vs average expected baseline
+    total_home_threat = home_shots_on_target * 2.0 + home_dangerous_attacks * 0.1 + home_corners * 0.5
+    total_away_threat = away_shots_on_target * 2.0 + away_dangerous_attacks * 0.1 + away_corners * 0.5
+    
+    # Calculate relative threat multiplier (Bounded to prevent insane spikes)
+    home_threat_multiplier = 1.0
+    away_threat_multiplier = 1.0
+    
+    if total_home_threat + total_away_threat > 0:
+        home_share = total_home_threat / (total_home_threat + total_away_threat)
+        away_share = total_away_threat / (total_home_threat + total_away_threat)
+        # Scale around 1.0. If a team has 80% of the threat, their multiplier is 1.6
+        home_threat_multiplier = max(0.5, min(2.0, home_share * 2.0))
+        away_threat_multiplier = max(0.5, min(2.0, away_share * 2.0))
+
+    # Apply all adjustments heavily weighted by attacking threat
+    live_home_xg = base_live_home_xg * home_poss_multiplier * home_red_multiplier * home_threat_multiplier * (1.0 + (away_red_cards * 0.5))
+    live_away_xg = base_live_away_xg * away_poss_multiplier * away_red_multiplier * away_threat_multiplier * (1.0 + (home_red_cards * 0.5))
     
     # Cap xG at 0 so math doesn't break
     live_home_xg = max(0.01, live_home_xg)
@@ -83,13 +101,16 @@ def calculate_live_probabilities(home_expected_goals, away_expected_goals,
 
 if __name__ == "__main__":
     # Test Scenario representing the Ghana vs Panama situation
-    print("--- 68th MINUTE, 0-0. Ghana dominating possession (70%). ---")
+    print("--- 68th MINUTE, 0-0. Ghana dominating heavily. ---")
     probs = calculate_live_probabilities(
         home_expected_goals=1.4, away_expected_goals=1.1, 
         current_home_score=0, current_away_score=0, 
         elapsed_minutes=68,
-        home_possession=70, away_possession=30
+        home_possession=70, away_possession=30,
+        home_shots_on_target=8, away_shots_on_target=0,
+        home_dangerous_attacks=45, away_dangerous_attacks=12
     )
     print(f"Ghana (Home) xG for rest of match: {probs['Live_Home_xG']:.2f}")
     print(f"Panama (Away) xG for rest of match: {probs['Live_Away_xG']:.2f}")
     print(f"Ghana Win: {probs['Home Win']:.1%} | Draw: {probs['Draw']:.1%} | Panama Win: {probs['Away Win']:.1%}")
+
